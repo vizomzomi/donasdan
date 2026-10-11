@@ -143,12 +143,24 @@ async function launchAndWatch() {
     )}`;
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
 
-    // Deteksi blokir Cloudflare, biar nggak pura-pura "connected"
-    const firstText = await page.evaluate(() =>
-      (document.body.innerText || "").slice(0, 300)
-    );
-    if (/you have been blocked|attention required|just a moment/i.test(firstText)) {
-      throw new Error("Diblokir Cloudflare (UA/IP kena blok): " + firstText.replace(/\s+/g, " ").slice(0, 80));
+    // Deteksi & tunggu challenge Cloudflare (maks ~30 detik), jangan pura-pura "connected"
+    const challengeRe =
+      /you have been blocked|attention required|just a moment|performing security verification|verify you are human|checking your browser/i;
+    const getText = () =>
+      page
+        .evaluate(() => (document.body.innerText || "").replace(/\s+/g, " ").slice(0, 400))
+        .catch(() => "");
+    let firstText = await getText();
+    for (let i = 0; i < 15 && challengeRe.test(firstText); i++) {
+      if (/you have been blocked/i.test(firstText)) break; // blokir keras, nunggu percuma
+      await new Promise((r) => setTimeout(r, 2000));
+      firstText = await getText();
+    }
+    // challenge lolos biasanya bikin halaman reload, kasih jeda lalu cek ulang
+    await new Promise((r) => setTimeout(r, 3000));
+    firstText = await getText();
+    if (challengeRe.test(firstText)) {
+      throw new Error("Diblokir Cloudflare (challenge nggak lolos): " + firstText.slice(0, 80));
     }
 
     await page.evaluate(() => {
