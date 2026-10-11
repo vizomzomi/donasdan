@@ -115,8 +115,13 @@ async function launchAndWatch() {
     await page.setViewport({ width: 1280, height: 720 });
 
     // === CCTV: semua console.log & error DI DALAM browser di-forward ke log Railway ===
+    // Halaman Saweria punya script anti-DevTools yang spam console, jadi
+    // cuma teruskan log kita sendiri (diawali "[PAGE]") dan error asli.
     page.on("console", (msg) => {
-      console.log(`[PAGE CONSOLE:${msg.type()}]`, msg.text());
+      const text = msg.text();
+      if (text.startsWith("[PAGE]") || text.startsWith("[HEARTBEAT ERROR]")) {
+        console.log(`[PAGE CONSOLE:${msg.type()}]`, text);
+      }
     });
     page.on("pageerror", (err) => {
       console.log("[PAGE ERROR]", err.message);
@@ -151,8 +156,14 @@ async function launchAndWatch() {
         let lastReported = "";
         let scanTimer = null;
 
+        let lastText = "";
         function scanPage() {
           const text = (document.body.innerText || "").replace(/\s+/g, " ").trim();
+          // DEBUG: tiap teks halaman berubah, kirim ke log supaya kelihatan format alert aslinya
+          if (text && text !== lastText) {
+            lastText = text;
+            window.__onHeartbeat("[CHANGE] " + text.slice(0, 300));
+          }
           const match = text.match(/(.+?baru saja memberikan\s+Rp\s*[\d.,]+.*)/i);
           const candidate = match ? match[1] : null;
           if (candidate && candidate !== lastReported) {
