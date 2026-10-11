@@ -9,7 +9,9 @@
  */
 
 const express = require("express");
-const puppeteer = require("puppeteer");
+const puppeteer = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+puppeteer.use(StealthPlugin());
 const crypto = require("crypto");
 
 const PORT = process.env.PORT || 3000;
@@ -84,14 +86,33 @@ async function launchAndWatch() {
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
+        "--window-size=1280,720",
       ],
     };
+    // Opsional: proxy (set PROXY_URL=http://host:port di Railway Variables)
+    if (process.env.PROXY_URL) {
+      launchOpts.args.push(`--proxy-server=${process.env.PROXY_URL}`);
+    }
     if (process.env.PUPPETEER_EXECUTABLE_PATH) {
       launchOpts.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
     }
 
     browser = await puppeteer.launch(launchOpts);
     const page = await browser.newPage();
+
+    // Proxy dengan login (opsional): PROXY_USER & PROXY_PASS
+    if (process.env.PROXY_USER) {
+      await page.authenticate({
+        username: process.env.PROXY_USER,
+        password: process.env.PROXY_PASS || "",
+      });
+    }
+
+    // Hilangkan jejak "HeadlessChrome" di User-Agent
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    );
+    await page.setViewport({ width: 1280, height: 720 });
 
     // === CCTV: semua console.log & error DI DALAM browser di-forward ke log Railway ===
     page.on("console", (msg) => {
@@ -116,6 +137,14 @@ async function launchAndWatch() {
       STREAM_KEY
     )}`;
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+
+    // Deteksi blokir Cloudflare, biar nggak pura-pura "connected"
+    const firstText = await page.evaluate(() =>
+      (document.body.innerText || "").slice(0, 300)
+    );
+    if (/you have been blocked|attention required|just a moment/i.test(firstText)) {
+      throw new Error("Diblokir Cloudflare (UA/IP kena blok): " + firstText.replace(/\s+/g, " ").slice(0, 80));
+    }
 
     await page.evaluate(() => {
       try {
@@ -184,7 +213,8 @@ async function launchAndWatch() {
         await browser.close();
       } catch {}
     }
-    setTimeout(launchAndWatch, 15000);
+    const delay = /Diblokir Cloudflare/.test(e.message) ? 60000 : 15000;
+    setTimeout(launchAndWatch, delay);
   }
 }
 
